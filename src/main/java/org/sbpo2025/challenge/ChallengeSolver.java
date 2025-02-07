@@ -1,12 +1,18 @@
 package org.sbpo2025.challenge;
 
-import org.apache.commons.lang3.time.StopWatch;
-
 import java.util.Arrays;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+
+import org.apache.commons.lang3.time.StopWatch;
+
+import ilog.concert.IloException;
+import ilog.concert.IloIntVar;
+import ilog.concert.IloLinearNumExpr;
+import ilog.cplex.IloCplex;
 
 public class ChallengeSolver {
     private final long MAX_RUNTIME = 600000; // milliseconds; 10 minutes
@@ -27,10 +33,74 @@ public class ChallengeSolver {
     }
 
     public ChallengeSolution solve(StopWatch stopWatch) {
-        // Implement your solution here
-        return null;
-    }
+		solveWithCPLEX();
+		return null;
+	}
 
+	public ChallengeSolution solveWithCPLEX() {
+		try {
+			IloCplex cplex = new IloCplex();
+
+			// Definir variáveis de decisão
+			IloIntVar[] orderVars = cplex.boolVarArray(orders.size());
+			IloIntVar[] aisleVars = cplex.boolVarArray(aisles.size());
+
+			// Definir função objetivo: maximizar a quantidade total de itens coletados
+			IloLinearNumExpr objective = cplex.linearNumExpr();
+			for (int i = 0; i < orders.size(); i++) {
+				for (Map.Entry<Integer, Integer> entry : orders.get(i).entrySet()) {
+					objective.addTerm(entry.getValue(), orderVars[i]);
+				}
+			}
+			cplex.addMaximize(objective);
+
+			// Definir restrições de capacidade dos corredores
+			for (int j = 0; j < aisles.size(); j++) {
+				IloLinearNumExpr aisleCapacity = cplex.linearNumExpr();
+				for (Map.Entry<Integer, Integer> entry : aisles.get(j).entrySet()) {
+					aisleCapacity.addTerm(entry.getValue(), aisleVars[j]);
+				}
+				cplex.addLe(aisleCapacity, waveSizeUB);
+			}
+
+			// Definir restrições de quantidade mínima e máxima de itens coletados
+			IloLinearNumExpr totalItems = cplex.linearNumExpr();
+			for (int i = 0; i < orders.size(); i++) {
+				for (Map.Entry<Integer, Integer> entry : orders.get(i).entrySet()) {
+					totalItems.addTerm(entry.getValue(), orderVars[i]);
+				}
+			}
+			cplex.addGe(totalItems, waveSizeLB);
+			cplex.addLe(totalItems, waveSizeUB);
+
+			// Resolver o modelo
+			if (cplex.solve()) {
+				System.out.println("Solution status = " + cplex.getStatus());
+				System.out.println("Solution value = " + cplex.getObjValue());
+
+				// Criar e retornar a solução do desafio
+				Set<Integer> selectedOrders = new HashSet<>();
+				Set<Integer> visitedAisles = new HashSet<>();
+				for (int i = 0; i < orders.size(); i++) {
+					if (cplex.getValue(orderVars[i]) > 0.5) {
+						selectedOrders.add(i);
+					}
+				}
+				for (int j = 0; j < aisles.size(); j++) {
+					if (cplex.getValue(aisleVars[j]) > 0.5) {
+						visitedAisles.add(j);
+					}
+				}
+				return new ChallengeSolution(selectedOrders, visitedAisles);
+			} else {
+				System.out.println("Solution not found");
+				return null;
+			}
+		} catch (IloException e) {
+			e.printStackTrace();
+			return null;
+		}
+	}
     /*
      * Get the remaining time in seconds
      */
@@ -101,4 +171,5 @@ public class ChallengeSolver {
         // Objective function: total units picked / number of visited aisles
         return (double) totalUnitsPicked / numVisitedAisles;
     }
+
 }
